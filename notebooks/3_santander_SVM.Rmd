@@ -1,0 +1,178 @@
+---
+wtitle: "santander_SVM"
+author: "Sahana Ramakrishnan"
+date: "2024-12-05"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(LiblineaR)  #SVM
+library(caret)  #data splitting and evaluation
+```
+
+## SVM to classify binary response variable - Santander case study
+
+### Loading data sets
+```{r}
+train <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/train.csv")
+test <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/test.csv")
+
+```
+- Loaded the training and test data sets
+
+### Data preprocessing and minmax scaling
+```{r}
+# Separate predictors and target
+train_features <- train %>% select(-ID_code, -target)
+train_target <- as.factor(train$target)  # Ensure target is a factor
+test_features <- test %>% select(-ID_code)
+
+# Apply MinMax scaling
+preProc <- preProcess(train_features, method = "range")  # MinMax scaling
+train_features_scaled <- predict(preProc, train_features)
+test_features_scaled <- predict(preProc, test_features)
+
+# Combine scaled features and target for training
+train_data <- as.data.frame(cbind(train_features_scaled, target = train_target))
+```
+
+- Applied MinMax scaling to normalize feature values between 0 and 1 for both training and test sets.
+- Ensured that feature scaling is consistent across the training and test datasets.
+- Combined the scaled features with the target variable into a single df: train_data
+- The processed training data will be used for SVM model training
+
+### LibLineaR: SVM model training with cross-validation
+```{r}
+# Convert training features and target to matrices
+x_train <- as.matrix(train_features_scaled)
+y_train <- as.numeric(as.factor(train$target)) - 1  # Convert target to 0 and 1
+
+# Perform cross-validation for cost parameter
+set.seed(123)
+cost_values <- c(0.01, 0.1, 1, 10, 100)
+cv_results <- sapply(cost_values, function(cost) {
+  model <- LiblineaR(data = x_train, target = y_train, type = 1, cost = cost, cross = 5)  # L2-regularized SVM
+  return(model)
+})
+
+# Find the best cost
+best_cost <- cost_values[which.max(cv_results)]
+cat("Best cost:", best_cost, "\n")
+cat("Best cross-validation accuracy:", max(cv_results), "\n")
+
+```
+
+- using the LiblineaR library for large Santander dataset as it’s optimized for linear SVM and logistic regression. 
+- It’s much faster than traditional SVM libraries for high-dimensional data
+
+- performed cross-validation using the LiblineaR to find the optimal cost parameter:C for an L2-regularized linear SVM, testing multiple C values and returning the best one based on accuracy
+- The best cost parameter so far is 0.1, achieving a cross-validation accuracy of 91.18%
+
+### Training final model with Best cost
+```{r}
+# Train the final SVM model with the best cost
+final_model <- LiblineaR(data = x_train, target = y_train, type = 1, cost = best_cost)
+
+# Predict on training data
+train_pred <- predict(final_model, x_train)$predictions
+train_accuracy <- mean(train_pred == y_train)
+cat("Training Accuracy:", train_accuracy, "\n")
+
+```
+- trained the final SVM model using the best_cost identified earlier; predicted on training data, and calculated training accuracy.
+- training accuracy of the final SVM model is 91.20%, indicating the model performs well on the training dataset with the chosen hyperparameter.
+
+### Final predictions on Test data
+```{r}
+## Convert test features to matrix
+x_test <- as.matrix(test_features_scaled)
+
+# Predict on test data
+test_pred <- predict(final_model, x_test)$predictions
+
+# Save predictions to a CSV file
+write.csv(data.frame(ID = test$ID_code, Target = test_pred), "svm_liblinear_predictions.csv", row.names = FALSE)
+
+# Display the first few rows of predictions
+head(data.frame(ID = test$ID_code, Target = test_pred))
+
+```
+- Predicted target values for the test dataset using trained final SVM model and saved the predictions along with the test IDs into a CSV file 
+
+
+### Hyperparameter tuning with different cost values
+```{r}
+# Define a range of cost values for hyperparameter tuning
+cost_values <- c(0.01, 0.1, 1)
+
+# Initialize storage for results
+tuning_results <- data.frame(Cost = numeric(), Accuracy = numeric())
+
+# Perform cross-validation for each cost value
+for (cost in cost_values) {
+  set.seed(123)
+  cv_accuracy <- LiblineaR(
+    data = x_train,
+    target = y_train,
+    type = 1,  # L2-regularized SVM (primal)
+    cost = cost,
+    cross = 5  # 5-fold cross-validation
+  )
+  tuning_results <- rbind(tuning_results, data.frame(Cost = cost, Accuracy = cv_accuracy))
+}
+
+# Display tuning results
+tuning_results
+
+# Identify the best cost value
+best_cost <- tuning_results$Cost[which.max(tuning_results$Accuracy)]
+cat("Best Cost:", best_cost, "\n")
+
+# Train the final model with the best cost
+final_model <- LiblineaR(data = x_train, target = y_train, type = 1, cost = best_cost)
+
+# Predict on the test set
+test_pred <- predict(final_model, x_test)$predictions
+
+# Save test predictions
+write.csv(data.frame(ID = test$ID_code, Target = test_pred), "svm_liblinear_tuned_predictions.csv", row.names = FALSE)
+
+# Display predictions
+head(data.frame(ID = test$ID_code, Target = test_pred))
+
+```
+
+- hyperparameter tuning results show that the best cost value is 1, achieving the highest cross-validation accuracy of 91.19%
+- This indicates that a moderate cost value provides the best balance between margin maximization and classification performance.
+
+### Visualizing hyperparameters tuning test
+```{r}
+# Plot the effect of cost on accuracy
+library(ggplot2)
+
+ggplot(tuning_results, aes(x = Cost, y = Accuracy)) +
+  geom_point(size = 4) +
+  geom_line() +
+  scale_x_log10() +  # Use log scale for cost
+  labs(
+    title = "Effect of Cost on SVM Accuracy",
+    x = "Cost (C)",
+    y = "Accuracy"
+  ) +
+  theme_minimal()
+```
+
+The plot shows the effect of the cost parameter: C on SVM accuracy. As the cost value increases from 0.01 to 1, the accuracy improves, with the highest accuracy of 91.19% achieved at C = 1, indicating better classification performance with higher regularization strength.
+
+## Effect on Cost Function
+
+The cost parameter: C determines the trade-off between achieving a lower training error and maintaining a larger margin separating the classes:
+- Low values of C = 0.01, prioritize a wider margin, potentially leading to misclassification of some training points. This resulted in an accuracy of 91.10%
+- Moderate values of C = 0.1 balance margin maximization with classification accuracy, improving accuracy to 91.18%
+- High values of C = 1 penalize misclassifications more heavily, leading to the best accuracy of 91.19%, as the model fits the training data more closely.
+
+The cross-validation results and the plot demonstrate that increasing the cost parameter reduced the cost function, improving accuracy up to a certain threshold
+
+The hyperparameter tuning effectively reduced the cost function, as higher values of C minimized classification errors.

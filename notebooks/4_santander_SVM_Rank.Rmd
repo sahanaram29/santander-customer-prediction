@@ -1,0 +1,136 @@
+---
+title: "Santander_SVM_Rank"
+author: "Sahana Ramakrishnan"
+date: "2024-12-06"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(LiblineaR)
+```
+
+## Santander dataset - Ranking using SVM
+
+### Data loading
+```{r}
+train <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/train.csv")
+test <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/test.csv")
+```
+### Splitting predictors and target
+```{r}
+# Split
+train_features <- train %>% select(-ID_code, -target)
+train_target <- as.factor(train$target)  # Ensure target is a factor
+test_features <- test %>% select(-ID_code)
+```
+
+- Completed splitting the predictors and target making sure that target variable is a factor.
+
+### PCA dimensionality reduction
+```{r}
+# Standardizing predictors
+train_features_scaled <- scale(train_features)
+test_features_scaled <- scale(test_features, center = attr(train_features_scaled, "scaled:center"), 
+                               scale = attr(train_features_scaled, "scaled:scale"))
+
+# PCA
+pca <- prcomp(train_features_scaled, center = TRUE, scale. = TRUE)
+
+# retaining top 50 components
+train_pca <- as.data.frame(pca$x[, 1:50]) 
+train_pca$target <- train_target
+test_pca <- as.data.frame(predict(pca, test_features_scaled)[, 1:50])
+
+```
+
+- Scaled both training and test features to have mean 0 and variance 1 for consistent preprocessing
+- Reduced dimensionality by retaining the top 50 PC for both training and test datasets
+
+### Performing SVM Ranking
+```{r}
+# Convert data to use for LiblineaR
+x_train <- as.matrix(train_pca %>% select(-target))
+y_train <- as.numeric(as.factor(train_pca$target)) - 1  # Convert to 0 and 1
+
+# Perform cross-validation to find the best cost parameter
+set.seed(123)
+cost_values <- c(0.01, 0.1, 1, 10)
+cv_results <- sapply(cost_values, function(cost) {
+  model <- LiblineaR(data = x_train, target = y_train, type = 1, cost = cost, cross = 5)  # L2-regularized SVM
+  return(model)
+})
+
+#best cost
+best_cost <- cost_values[which.max(cv_results)]
+cat("Best cost for ranking task:", best_cost, "\n")
+cat("Best cross-validation accuracy:", max(cv_results), "\n")
+
+```
+- The best cost parameter for the ranking task is 1, achieving a cross-validation accuracy of 91.14%
+- This indicates the model performs optimally with this cost value, balancing margin maximization and classification accuracy
+
+
+### Final model training with best cost
+```{r}
+# Train final model using the best cost
+final_model <- LiblineaR(data = x_train, target = y_train, type = 0, cost = best_cost)
+
+# Predict probabilities for training data
+train_pred <- predict(final_model, x_train, proba = TRUE)$probabilities[, 2]
+
+cat("Length of train_pred:", length(train_pred), "\n")
+
+```
+- The final model is trained now, using the best_cost calculated from SVM ranking step.
+
+```{r}
+nrow(train_pca)
+length(train_pred)
+
+#train_pca
+```
+- Making sure that the no. of rows in train_pca = length of train_pred so as to attach probabilities for ranking purpose in the next step.
+
+
+```{r}
+# Attach probabilities for ranking
+train_pca$ranking_score <- train_pred
+train_ranking <- train_pca %>% arrange(desc(ranking_score))
+
+# Display top 10 ranked instances
+head(train_ranking, 10)
+
+```
+
+- The above table shows the top 10 ranked instances from training set.
+
+
+### Predict and Ranking Test data
+```{r}
+# Prepare test data
+x_test <- as.matrix(test_pca)
+
+# Predict probabilities for test data
+test_pred <- predict(final_model, x_test, proba = TRUE)$probabilities[, 2]
+
+# Attach probabilities for ranking
+test_pca$ranking_score <- test_pred
+test_ranking <- test_pca %>% mutate(ID = test$ID_code) %>% arrange(desc(ranking_score))
+
+# Save ranked test predictions
+write.csv(test_ranking %>% select(ID, ranking_score), "svm_test_ranking.csv", row.names = FALSE)
+
+# Display top 10 ranked test instances
+head(test_ranking, 10)
+
+```
+
+- The svm_test_ranking.csv file ranks test instances by their likelihood of being class 1: positive class
+- Instances with higher ranking_score are more likely classified as 1
+- The probabilities aka ranking_score, range between 0 and 1, where higher values indicate stronger confidence in the positive class.
+
+
+

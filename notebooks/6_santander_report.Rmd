@@ -1,0 +1,177 @@
+---
+title: "Final Santander_Report"
+author: "Sahana Ramakrishnan"
+date: "2024-12-19"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(caret)
+library(ranger) # Random Forest
+library(xgboost) # XGBoost
+library(LiblineaR) # SVM
+```
+
+### Loading dataset
+```{r}
+train <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/train.csv")
+test <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/test.csv")
+
+#Merging datasets
+master_data <- train %>% bind_rows(test)
+# Check for missing values
+summary(master_data)
+```
+
+- Loaded the necessary training and test data set
+- Merged train and test data to master data for further analysis
+
+### Performing EDA
+```{r}
+ggplot(master_data, aes(x = target)) +
+  geom_bar() +
+  labs(title = "Target Distribution", x = "Target", y = "Count")
+```
+
+- Target and count distribution of the merged data
+
+### Preprocessing and Feature scaling
+```{r}
+scaled_features <- scale(master_data %>% select(-target, -ID_code))
+# Convert scaled matrix back to a data frame
+scaled_features_df <- as.data.frame(scaled_features)
+
+# Add the target and ID_code columns back
+master_data_scaled <- cbind(scaled_features_df, target = master_data$target, ID_code = master_data$ID_code)
+
+```
+
+- Performed pre processing of master data and converted scaled matrix to data frame for model training
+
+### Model Training
+```{r}
+# Performing PCA to reduce dimensionality
+pca <- prcomp(master_data %>% select(-target, -ID_code), center = TRUE, scale. = TRUE)
+# Retain top 50 components
+pca_data <- as.data.frame(pca$x[, 1:50])
+# Add back the target column
+master_data_scaled <- cbind(pca_data, target = master_data$target)
+```
+
+- Used Principal component analysis for dimensionality reduction of master data and have top 50 components
+
+### Logistic Regression
+```{r}
+# Logistic Regression
+log_model <- glm(target ~ ., data = master_data_scaled, family = binomial())
+log_pred <- predict(log_model, newdata = master_data_scaled, type = "response")
+```
+
+- Fitted logistic regression model to predict the target variable using all features, and generate probability predictions for the dataset.
+
+###SVM
+```{r}
+x_train <- as.matrix(master_data_scaled %>% select(-target))
+y_train <- as.numeric(master_data_scaled$target) - 1
+#since y_train has NA values, replacing with 0
+y_train[is.na(y_train) | is.nan(y_train)] <- 0
+svm_model <- LiblineaR(data = x_train, target = y_train, type = 1, cost = 0.1)
+
+```
+
+- Prepared the training data by converting features to a matrix and target to numeric.
+- Handled missing values in the target by replacing them with 0
+- trained SVM model using L2-regularized logistic regression with a cost parameter of 0.1
+
+### Random forest
+```{r}
+#handling NA values from master_data_scaled
+master_data_scaled <- master_data_scaled[!is.na(master_data_scaled$target), ]
+
+rf_model <- ranger(target ~ ., data = master_data_scaled, num.trees = 100, mtry = 10)
+```
+- Removed rows with missing target values from the dataset
+- trained Random Forest model with 100 trees and 10 randomly selected features at each split.
+
+### XGBoost
+```{r}
+# Convert target to numeric
+master_data_scaled$target <- as.numeric(as.factor(master_data_scaled$target)) - 1
+# Convert features to matrix
+xgb_data <- as.matrix(master_data_scaled %>% select(-target))
+xgb_label <- master_data_scaled$target
+
+xgb_model <- xgboost(
+  data = xgb_data,
+  label = xgb_label,
+  nrounds = 200,
+  max_depth = 6,
+  eta = 0.3,
+  objective = "binary:logistic",
+  verbose = 0
+)
+```
+
+- converted the target variable to numeric format and features to a matrix
+- trained XGBoost model with 200 boosting rounds, maximum tree depth of 6, and a learning rate of 0.3 for binary classification
+
+
+
+### Model Comparison
+```{r}
+#Accuracy
+
+#Logistic Regression
+# Convert probabilities to binary predictions
+log_pred_labels <- ifelse(log_pred > 0.5, 1, 0)
+log_accuracy <- mean(log_pred_labels == master_data_scaled$target)
+
+# SVM accuracy
+# Predict with SVM model
+svm_pred <- predict(svm_model, x_train)$predictions
+svm_accuracy <- mean(svm_pred == y_train)
+
+#Random Forest accuracy
+# Predict with Random Forest model
+rf_pred <- predict(rf_model, data = master_data_scaled)$predictions
+rf_accuracy <- mean(rf_pred == master_data_scaled$target)
+
+#XGBoost accuracy
+# Predict with XGBoost
+xgb_pred_prob <- predict(xgb_model, as.matrix(master_data_scaled %>% select(-target)))
+# Convert probabilities to binary predictions
+xgb_pred_labels <- ifelse(xgb_pred_prob > 0.5, 1, 0)
+xgb_accuracy <- mean(xgb_pred_labels == master_data_scaled$target)
+
+results <- data.frame(
+  Model = c("Logistic Regression", "SVM", "Random Forest", "XGBoost"),
+  Accuracy = c(
+    log_accuracy,
+    svm_accuracy,
+    rf_accuracy,
+    xgb_accuracy
+  )
+)
+
+print(results)
+
+```
+
+- converted predicted probabilities to binary labels using a threshold of 0.5 and calculate the accuracy by comparing predictions with the actual target
+- Generated predictions using the SVM model and calculated accuracy by comparing them to the true target values
+- Predicted class labels using the random forest model and computed accuracy by comparing predictions to the actual target
+- Predicted probabilities with the XGBoost model, converted them to binary labels using a threshold of 0.5, and calculated the accuracy against the actual target
+
+- Logistic regression achieved an accuracy of 89.49%
+- SVM achieved an accuracy of 55.46%
+- Random forest achieved an accuracy of 20.1%
+- XGBoost achieved an accuracy of 94.4% - highest accuracy among all models
+
+- Logistic Regression performed reasonably well, indicating the dataset's underlying linear separability to some extent.
+- SVM struggled with accuracy suggesting need for further hyperparameter optimization.
+- Random forest's performance was poor likely due to inadequate hyperparameter tuning or insufficient trees for this high-dimensional dataset
+- SVM and Random Forest require more thorough hyperparameter tuning and potential feature engineering for improved performance.
+- Linear models such as Logistic Regression can still perform well if the dataset exhibits linear relationships.
+- XGBoost with proper tuning, is highly effective for complex binary classification tasks

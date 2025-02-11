@@ -1,0 +1,111 @@
+---
+title: "Santander_Case"
+author: "Sahana Ramakrishnan"
+date: "2024-11-21"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(tidyr)
+library(summarytools)
+library(gridExtra)
+```
+
+## Santander Bank Case Study
+
+### Loading data
+```{r}
+#train and test data
+train <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/train.csv")
+test <- read_csv("D:/NewEng/Fall - Winter 2024/Santander case study/data set/test.csv")
+
+head(train)
+head(test)
+
+```
+- Loaded Santander data set
+- Checking the data using head function
+
+
+### Merging the data
+```{r}
+
+# Adding a column to differentiate train and test
+train <- train %>% mutate(dataset = "train")
+test <- test %>% mutate(dataset = "test")
+
+# combining data for unified EDA
+combined_data <- bind_rows(train, test)
+
+```
+
+- A new column is added to differentiate between the training and test datasets which are then combined using the bind_rows() function for unified EDA.
+- This allows seamless exploration of patterns across both datasets while keeping them distinguishable
+
+### Performing EDA
+```{r}
+# Distribution of target column var.
+table(train$target)
+target_distribution <- ggplot(train, aes(x = factor(target))) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Distribution of Target variable", x = "Target", y = "Count") +
+  theme_minimal()
+
+target_distribution
+
+```
+
+- The majority class: target = 0, significantly outweighs the minority class: target = 1, showing severe class imbalance in the dataset.
+
+- This imbalance suggests that specialized techniques like resampling or adjusting class weights may be required to ensure model performance is not biased toward the majority class
+
+### Feature Analysis
+```{r}
+# summary of numerical predictors
+summary(train %>% select(starts_with("var_")))
+
+# corr. matrix of some predictors
+predictor_subset <- train %>% select(var_0:var_10)
+correlation_matrix <- cor(predictor_subset)
+correlation_matrix
+
+```
+
+- Summary statistics are calculated for the numerical predictors to understand their range and distribution.
+- A correlation matrix of selected predictors: var_0 to var_10 is generated to identify relationships and dependencies between features.
+
+### plotting predictors
+```{r}
+# scatterplot of 2 predictors
+scatter_plot <- ggplot(train, aes(x = var_0, y = var_1, color = factor(target))) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Scatterplot of var_0 and var_1", x = "var_0", y = "var_1") +
+  theme_minimal()
+
+scatter_plot
+
+# Distribution of single predictor
+predictor_distribution <- ggplot(train, aes(x = var_2)) +
+  geom_density(fill = "purple", alpha = 0.6) +
+  labs(title = "Density Plot of var_2", x = "var_2", y = "Density") +
+  theme_minimal()
+
+predictor_distribution
+
+```
+
+
+- The scatterplot indicates the target classes 0 and 1 are not well-separated for the features var_0 and var_1 suggesting limited predictive power of these individual features.
+
+- The overlapping points across classes highlight the need for additional feature engineering or combining multiple features to improve class distinction.
+
+- The density plot of var_2 shows a unimodal distribution with a peak between 9 and 10 indicating that most values of var_2 are concentrated within this range.
+
+- There is no visible outliers or anomalies in the density plot showing var_2 a stable predictor in the dataset
